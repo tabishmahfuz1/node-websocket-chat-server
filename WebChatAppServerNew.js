@@ -2,9 +2,9 @@
 // Optional. You will see this name in eg. 'ps' or 'top' command
 process.title = 'node-chat';
 // Port where we'll run the websocket server
-var webSocketsServerPort = 1337;
+var ServerPort = 1337;
 // websocket and http servers
-var webSocketServer = require('websocket').server;
+var WebSocketServer = require('websocket').server;
 var http = require('http');
 var url = require('url');
 const db = require('./models/index.js');
@@ -20,14 +20,7 @@ var history = [ ];
 var clientLists = new Map();
 
 // var clientIndexes = [ ];
-/**
- * Helper function for escaping input strings
- */
-function htmlEntities(str) {
-  return String(str)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+
 /**
  * HTTP server
  */
@@ -64,14 +57,14 @@ var server = http.createServer(function(request, response) {
 
   
 });
-server.listen(webSocketsServerPort, function() {
+server.listen(ServerPort, function() {
   console.log((new Date()) + " Server is listening on port "
-      + webSocketsServerPort);
+      + ServerPort);
 });
 /**
  * WebSocket server
  */
-var wsServer = new webSocketServer({
+var WSServer = new WebSocketServer({
   // WebSocket server is tied to a HTTP server. WebSocket
   // request is just an enhanced HTTP request. For more info 
   // http://tools.ietf.org/html/rfc6455#page-6
@@ -81,48 +74,51 @@ var wsServer = new webSocketServer({
 
 // This callback function is called every time someone
 // tries to connect to the WebSocket server
-wsServer.on('request', function(request) {
+WSServer.on('request', function(request) {
   console.log((new Date()) + ' Connection from origin '
       + request.origin + '.');
   // accept connection - you should check 'request.origin' to
   // make sure that client is connecting from your website
   // (http://en.wikipedia.org/wiki/Same_origin_policy)
-  var queryParams = request.resourceURL.query;
-  var userID      = queryParams.user_id;
-
   var connection = request.accept(null, request.origin);
-  if(!clientLists.has(queryParams.subdomain)) {
-    clientLists.set(queryParams.subdomain, new Map());
+
+  var queryParams = request.resourceURL.query;
+  
+  connection.userID     = request.resourceURL.query;
+  connection.group      = request.resourceURL.query.group;
+  
+  if(!clientLists.has(connection.group)) {
+    clientLists.set(connection.group, new Map());
   }
 
-  if(!clientLists.get(queryParams.subdomain).has(userID)){
-    clientLists.get(queryParams.subdomain).set(userID, []);
+  if(!clientLists.get(connection.group).has(userID)){
+    clientLists.get(connection.group).set(userID, []);
   }
-   var arr_index   = clientLists.get(queryParams.subdomain).get(userID).push(connection) - 1;
+  var arr_index   = clientLists.get(connection.group).get(userID).push(connection) - 1;
+  connection.arr_index  = arr_index;
 
   // for (var [cliendID, conn] of clientLists) {
   connection.sendUTF(
     JSON.stringify({type: 'users_list', 
-      data: Array.from( clientLists.get(queryParams.subdomain).keys() )}));
+      data: Array.from( clientLists.get(connection.group).keys() )}));
 
   if(arr_index == 0) {         //First Connection from this User
-    for (var conn of clientLists.get(queryParams.subdomain).values()) {
+    for (var conn of clientLists.get(connection.group).values()) {
       for(let i = 0; i< conn.length; i++) {
         conn[i].sendUTF(
           JSON.stringify({type: 'new_peer', data: userID}));
       }
     }
   }
-  
 
-  ChatMessage.checkPendingMessages(userID, queryParams.subdomain)
+  ChatMessage.checkPendingMessages(userID, connection.group)
   // .then(sendPendingMessages)
   .then((pendingMessages) => {
   if(pendingMessages.length){
     for (let i = 0; i < pendingMessages.length; i++) {
-      ChatMessage.getChatHistory(userID, pendingMessages[i].author, queryParams.subdomain).then((history) => {
+      ChatMessage.getChatHistory(userID, pendingMessages[i].author, connection.group).then((history) => {
          connection.send(JSON.stringify({type: "chat_history", data: history, history_of: pendingMessages[i].author}));
-         ChatMessage.markMessagesRead(pendingMessages[i].author, userID, queryParams.subdomain)
+         ChatMessage.markMessagesRead(pendingMessages[i].author, userID, connection.group)
          .catch((err) => {
             console.log("Error while Updating Delivery");
             console.log(err);
@@ -139,12 +135,11 @@ wsServer.on('request', function(request) {
   // send back chat history
   // user sent some message
   connection.on('message', function(message) {
-    // console.log(message);
     if (message.type === 'utf8') { // accept only text
     var messageObj = JSON.parse(message.utf8Data);
      if (messageObj.type === 'messageHistory') {
       if(messageObj.recipient){
-        ChatMessage.getChatHistory(userID, messageObj.recipient, queryParams.subdomain).then((data) => {
+        ChatMessage.getChatHistory(userID, messageObj.recipient, queryParams.group).then((data) => {
            connection.send(JSON.stringify({type: "chat_history", data: data, history_of: messageObj.recipient}));
         });
       }
@@ -159,7 +154,7 @@ wsServer.on('request', function(request) {
           text: message.utf8Data,
           author: userID,
           recipient: messageObj.recipient,
-          company:  queryParams.subdomain,
+          company:  queryParams.group,
           delivered: 0
         };
         sendMessage(obj);
@@ -175,7 +170,7 @@ wsServer.on('request', function(request) {
           text: htmlEntities(messageObj.msg),
           author: userID,
           recipient: messageObj.recipient,
-          company:  queryParams.subdomain,
+          company:  queryParams.group,
           delivered: 0
         };
         var json = JSON.stringify({ type:'message', data: obj });
@@ -192,73 +187,20 @@ wsServer.on('request', function(request) {
     if (userID !== false) {
       // console.log((new Date()) + " Peer " + userID + " disconnected.");
       // remove user from the list of connected clients
-      // console.log(clientLists.get(queryParams.subdomain).values());
-      var arr = clientLists.get(queryParams.subdomain).get(userID);
+      // console.log(clientLists.get(queryParams.group).values());
+      var arr = clientLists.get(queryParams.group).get(userID);
       if(arr.length == 1){
-        clientLists.get(queryParams.subdomain).delete(userID);
-        // console.log("Users", clientLists.get(queryParams.subdomain).keys());
-        for (var user_id of clientLists.get(queryParams.subdomain).keys()) {
-          sendToClient(queryParams.subdomain, user_id, JSON.stringify({type: 'disconnected_peer', data: userID}));
+        clientLists.get(queryParams.group).delete(userID);
+        // console.log("Users", clientLists.get(queryParams.group).keys());
+        for (var user_id of clientLists.get(queryParams.group).keys()) {
+          sendToClient(queryParams.group, user_id, JSON.stringify({type: 'disconnected_peer', data: userID}));
         }
       } else {
         var new_arr = arr.splice(arr_index, 1);
         // console.log("UserLength", new_arr.length);
         // console.log("TPYE", new_arr);
-        clientLists.get(queryParams.subdomain).set(userID, new_arr);
+        clientLists.get(queryParams.group).set(userID, new_arr);
       }
     }
   });
 });
-
-var sendPendingMessages = (pendingMessages) => {
-  if(pendingMessages.length){
-    for (let i = 0; i < pendingMessages.length; i++) {
-      ChatMessage.getChatHistory(userID, pendingMessages[i].author, queryParams.subdomain).then((history) => {
-         connection.send(JSON.stringify({type: "chat_history", data: history, history_of: pendingMessages[i].author}));
-         ChatMessage.markMessagesRead(pendingMessages[i].author, userID, queryParams.subdomain)
-         .catch((err) => {
-            console.log("Error while Updating Delivery");
-            console.log(err);
-         });
-      });
-    }
-  }
-}
-
-
-function sendMessage(obj) {
-  // console.log("Sending")
-  var json = JSON.stringify(obj);
-  var this_author_conns = clientLists.get(obj.company).get(obj.author);
-  if(obj.recipient){
-    if(clientLists.get(obj.company).has(obj.recipient)){
-      obj.delivered = 1;
-      // clientLists.get(obj.company).get(obj.recipient).sendUTF(json);
-      sendToClient(obj.company, obj.recipient, json);
-      sendToClient(obj.company, obj.author, json);
-
-    }
-    else{
-      // clientLists.get(obj.company).get(obj.author).sendUTF(json);
-      sendToClient(obj.company, obj.author, json);
-    }
-  }
-  else
-    for (var conn of clientLists.get(obj.company).values()) {
-      conn.sendUTF(json);
-    }
-  const message = ChatMessage.create(obj).then(() => {
-    // console.log("Message Saved to DB");
-  }).catch(error => {
-    console.log(error);
-  });
-}
-
-function sendToClient(company, client, msg){
-  var client_conns = clientLists.get(company).get(client);
-  // console.log(client_conns)
-  for(let i = 0; i < client_conns.length; i++) {
-    console.log(i)
-    client_conns[i].sendUTF(msg);
-  }
-}

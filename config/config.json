@@ -2,14 +2,14 @@
   "development": {
     "username": "root",
     "password": null,
-    "database": "crystalworld",
+    "database": "chat",
     "host": "127.0.0.1",
     "dialect": "mysql"
   },
   "test": {
     "username": "root",
     "password": "annomidan#0731",
-    "database": "crystalworld",
+    "database": "chat",
     "host": "45.33.35.5",
     "dialect": "mysql"
   },

@@ -8,6 +8,8 @@ $(function () {
   var myColor = false;
   // my name sent to the server
   var myName = false;
+  var userId = 20;
+  var group = 'Default';
   // if user is running mozilla then use it's built-in WebSocket
   window.WebSocket = window.WebSocket || window.MozWebSocket;
   // if browser doesn't support WebSocket, just show
@@ -21,7 +23,7 @@ $(function () {
     return;
   }
   // open connection
-  var connection = new WebSocket('ws://127.0.0.1:1337');
+  var connection = new WebSocket('ws://127.0.0.1:1337?user_id=' + userId + '&group=' + group);
   connection.onopen = function () {
     // first we want users to enter their names
     input.removeAttr('disabled');
