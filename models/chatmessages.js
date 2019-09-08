@@ -1,11 +1,11 @@
 'use strict';
 module.exports = (sequelize, DataTypes) => {
   const ChatMessages = sequelize.define('ChatMessage', {
-    company: DataTypes.STRING,
-    author: DataTypes.INTEGER,
+    group: DataTypes.STRING,
+    author: DataTypes.STRING,
     type: DataTypes.STRING,
     text: DataTypes.TEXT,
-    recipient: DataTypes.INTEGER,
+    recipient: DataTypes.STRING,
     delivered: DataTypes.BOOLEAN,
     time: DataTypes.DATE
   }, {
@@ -13,9 +13,9 @@ module.exports = (sequelize, DataTypes) => {
   	tableName: 'chat_messages',
   });
 
-  ChatMessages.getChatHistory =  (author, recipient, company, offset = 0, limit = 50) => {
-  	return sequelize.query('SELECT * FROM chat_messages WHERE ((author = ? AND recipient = ?) OR (author = ? AND recipient = ?)) AND company = ? ORDER BY id DESC LIMIT ? OFFSET ?',
-	  { replacements: [author, recipient, recipient, author, company, limit, offset], type: sequelize.QueryTypes.SELECT }
+  ChatMessages.getChatHistory =  (author, recipient, group, offset = 0, limit = 50) => {
+  	return sequelize.query('SELECT * FROM chat_messages WHERE ((author = ? AND recipient = ?) OR (author = ? AND recipient = ?)) AND `group` = ? ORDER BY id DESC LIMIT ? OFFSET ?',
+	  { replacements: [author, recipient, recipient, author, group, limit, offset], type: sequelize.QueryTypes.SELECT }
 	).then(function(data) {
 	  return (data);
 	});
@@ -36,17 +36,17 @@ module.exports = (sequelize, DataTypes) => {
           });*/
   }
 
-  ChatMessages.checkPendingMessages =  (recipient, company) => {
-  	return sequelize.query('SELECT DISTINCT author FROM chat_messages WHERE company = ? AND recipient = ? AND delivered = 0',
-	  { replacements: [company, recipient], type: sequelize.QueryTypes.SELECT }
+  ChatMessages.checkPendingMessages =  (recipient, group) => {
+  	return sequelize.query('SELECT DISTINCT author FROM chat_messages WHERE `group` = ? AND recipient = ? AND delivered = 0',
+	  { replacements: [group, recipient], type: sequelize.QueryTypes.SELECT }
 	).then(function(data) {
 	  return (data) ;
 	});
   }
 
-  ChatMessages.markMessagesRead =  (author, recipient, company) => {
-  	return sequelize.query('UPDATE chat_messages SET delivered = 1 WHERE company = ? AND author = ? AND recipient = ?',
-	  { replacements: [company, author, recipient], type: sequelize.QueryTypes.UPDATE }
+  ChatMessages.markMessagesRead =  (author, recipient, group) => {
+  	return sequelize.query('UPDATE chat_messages SET delivered = 1 WHERE `group` = ? AND author = ? AND recipient = ?',
+	  { replacements: [group, author, recipient], type: sequelize.QueryTypes.UPDATE }
 	).then(function(data) {
 	  return (data) ;
 	});

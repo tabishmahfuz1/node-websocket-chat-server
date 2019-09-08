@@ -4,11 +4,8 @@ $(function () {
   var content = $('#content');
   var input = $('#input');
   var status = $('#status');
-  // my color assigned by the server
-  var myColor = false;
   // my name sent to the server
-  var myName = false;
-  var userId = 20;
+  var myName = prompt("Please enter your name", "Tabish");;
   var group = 'Default';
   // if user is running mozilla then use it's built-in WebSocket
   window.WebSocket = window.WebSocket || window.MozWebSocket;
@@ -23,11 +20,11 @@ $(function () {
     return;
   }
   // open connection
-  var connection = new WebSocket('ws://127.0.0.1:1337?user_id=' + userId + '&group=' + group);
+  var connection = new WebSocket('ws://127.0.0.1:1337?user_id=' + myName + '&group=' + group);
   connection.onopen = function () {
     // first we want users to enter their names
     input.removeAttr('disabled');
-    status.text('Choose name:');
+    status.text(myName + ':');
   };
   connection.onerror = function (error) {
     // just in there were some problems with connection...
@@ -51,22 +48,42 @@ $(function () {
     // NOTE: if you're not sure about the JSON structure
     // check the server source code above
     // first response from the server with user's color
-    if (json.type === 'color') { 
-      myColor = json.data;
-      status.text(myName + ': ').css('color', myColor);
-      input.removeAttr('disabled').focus();
-      // from now user can start sending messages
-    } else if (json.type === 'history') { // entire message history
+    if (json.type === 'chat_history') { // entire message history
       // insert every single message to the chat window
-      for (var i=0; i < json.data.length; i++) {
-      addMessage(json.data[i].author, json.data[i].text,
-          json.data[i].color, new Date(json.data[i].time));
+      var user_index = "user_" + json.history_of;
+      if(!hasInitialHistoryOf[user_index]){
+        hasInitialHistoryOf[user_index] = true;
       }
-    } else if (json.type === 'message') { // it's a single message
-      // let the user write another message
-      input.removeAttr('disabled'); 
-      addMessage(json.data.author, json.data.text,
-                 json.data.color, new Date(json.data.time));
+      console.log(json);
+      for (var i = json.data.length-1; i >= 0; i--) {
+        if(json.data[i].type == "file_link")
+          addFile(json.data[i], true);
+        else if(json.data[i].author == my_id || json.data[i].recipient == my_id )
+          addMessage(json.data[i].author, json.data[i].text,
+              'red', new Date(json.data[i].time), json.data[i].recipient, false);
+      }
+    }
+    else if(json.type === 'file_link'){
+      // addFile(json);
+    } 
+    else if (json.type === 'ClientList'){
+        console.log("User List Received");
+        // console.log(json.data);
+        refreshOnlineUsers(json.data);
+    }
+    else if (json.type == 'new_peer'){
+      console.log("A new Peer Connected");
+      // console.log(json.data);
+      refreshOnlineUsers(json.data, 'new_peer');
+    }
+    else if (json.type == 'disconnected_peer'){
+      console.log("A Peer Disconnected");
+      // console.log(json.data);
+      refreshOnlineUsers(json.data, 'disconnected_peer');
+    }
+    else if (json.type === 'message') { // it's a single message
+      addMessage(json.author, json.text,
+                 'red', new Date(json.time), json.recipient);
     } else {
       console.log('Hmm..., I\'ve never seen JSON like this:', json);
     }
@@ -80,16 +97,19 @@ $(function () {
       if (!msg) {
         return;
       }
+      msg = JSON.stringify(
+          { msg }
+        ); 
       // send the message as an ordinary text
       connection.send(msg);
       $(this).val('');
       // disable the input field to make the user wait until server
       // sends back response
-      input.attr('disabled', 'disabled');
+      // input.attr('disabled', 'disabled');
       // we know that the first message sent from a user their name
-      if (myName === false) {
+      /*if (myName === false) {
         myName = msg;
-      }
+      }*/
     }
   });
   /**
@@ -107,12 +127,27 @@ $(function () {
   /**
    * Add message to the chat window
    */
-  function addMessage(author, message, color, dt) {
-    content.prepend('<p><span style="color:' + color + '">'
+  function addMessage(author, message, color, dt, recipient) {
+    let Class = (author == recipient? 'text-right' : '');
+    content.prepend('<p class="' + Class + '"><span style="color:' + color + '">'
         + author + '</span> @ ' + (dt.getHours() < 10 ? '0'
         + dt.getHours() : dt.getHours()) + ':'
         + (dt.getMinutes() < 10
           ? '0' + dt.getMinutes() : dt.getMinutes())
         + ': ' + message + '</p>');
   }
+
+  function refreshOnlineUsers(data, type) {
+    console.log(data)
+    let $userList = $('#user_list');
+    if(type == 'new_peer') {
+      $userList.append(`<option value="${data}">${data}</option>`);
+    } else if(type == 'disconnected_peer') {
+      $userList.find('option[value=' + data + ']').remove();
+    } else {
+      $userList.append(data.reduce((x) => `<option value="${x}">${x}</option>`))
+    }
+  }
+
+
 });

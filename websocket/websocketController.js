@@ -1,4 +1,6 @@
 const clientLists = require('./clientList');
+const db = require('../models');
+var ChatMessage = db.ChatMessage;
 
 var broadcastNewClientNotification = function (clientConn) {
     let msg = { type: 'new_peer', data: clientConn.userID };
@@ -9,90 +11,105 @@ var broadcastInGroup = function ({ clientConn, group, msg }) {
 	if((!clientConn && !group) || !msg) {
 		return false;
 	}
+
+  if(typeof msg !== 'string')
+    msg = JSON.stringify(msg);
+
 	for (var conn of clientLists.getClientsInGroup(group || clientConn.group).values()) {
       	for(let i = 0; i< conn.length; i++) {
-        	conn[i].sendUTF(JSON.stringify(msg));
+        	conn[i].sendUTF(msg);
       	}
     }
 }
 
 var processPendingMessages = async function(clientConn){
 	try {
+      console.log("=>", clientConn.userID, clientConn.group);
   		let pendingMessages = 
   			await ChatMessage.checkPendingMessages(clientConn.userID, clientConn.group);
+
+      for (let i = 0; i < pendingMessages.length; i++) {
+          try {
+            let history  = ChatMessage.getChatHistory(clientConn.userID, 
+                      pendingMessages[i].author, clientConn.group);
+
+            clientConn.send(
+              JSON.stringify({
+                type: "chat_history", 
+                data: history, 
+                history_of: pendingMessages[i].author
+              })
+            );
+
+            ChatMessage.markMessagesRead(pendingMessages[i].author, 
+              clientConn.userID, clientConn.group);
+
+          } catch(err) {
+            console.error("DB-Error", err);
+          }
+      }
   	} catch (err) {
   		console.error("DB-Error", err);
   	}
-    for (let i = 0; i < pendingMessages.length; i++) {
-      	try {
-      		let history  = ChatMessage.getChatHistory(clientConn.userID, 
-      							pendingMessages[i].author, clientConn.group);
-      	} catch(err) {
-      		console.error("DB-Error", err);
-      	}
-    	clientConn.send(
-    		JSON.stringify({
-    			type: "chat_history", 
-    			data: history, 
-    			history_of: pendingMessages[i].author
-    		})
-    	);
-    	ChatMessage.markMessagesRead(pendingMessages[i].author, 
-    		clientConn.userID, clientConn.group);
-    }
+    
 }
 
 var handleClientRequest = async function (request) {
 	console.log((new Date()) + ' Connection from origin '
-      + request.origin + '.');
-  	// accept connection - you should check 'request.origin' to
-  	// make sure that client is connecting from your website
-  	// (http://en.wikipedia.org/wiki/Same_origin_policy)
-  	var connection = request.accept(null, request.origin);
+    + request.origin + '.');
+	// accept connection - you should check 'request.origin' to
+	// make sure that client is connecting from your website
+	// (http://en.wikipedia.org/wiki/Same_origin_policy)
+	var connection = request.accept(null, request.origin);
 
-  	var queryParams = request.resourceURL.query;
-  
-  	connection.userID     = request.resourceURL.query;
-  	connection.group      = request.resourceURL.query.group;
-  
-  	let arr_index = clientLists.addClientConnection(connection);
+	var queryParams = request.resourceURL.query;
 
-  	// for (var [cliendID, conn] of clientLists) {
-  	connection.sendUTF(
-    	JSON.stringify({type: 'users_list', 
-      		data: Array.from( clientLists.get(connection.group).keys() )}));
+	connection.userID     = request.resourceURL.query.user_id;
+	connection.group      = request.resourceURL.query.group;
+
+	let arr_index = clientLists.addClientConnection(connection);
+
+	// for (var [cliendID, conn] of clientLists) {
+	connection.sendUTF(
+  	JSON.stringify({type: 'ClientList', 
+    		data:  Array.from(clientLists.getClientsInGroup(connection.group).keys()) }));
 
 	if(arr_index == 0) {         //First Connection from this User
-	    broadcastNewClientNotification(connection.userID);
+	    broadcastNewClientNotification(connection);
 	}
 
-  	processPendingMessages(connection);
+  processPendingMessages(connection);
 
-  	// TODO: Add OnMessage, OnClose and OnError Handlers
-  	connection.on('message', messageHandler);
-  	connection.on('close', connectionCloseHandler);
+	// TODO: Add OnMessage, OnClose and OnError Handlers
+	connection.on('message', messageHandler);
+	connection.on('close', connectionCloseHandler);
 }
 
 let sendChatHistory = async (clientConn, historyWith, clientGroup) => {
 	clientGroup = clientGroup || clientLists.defaultGroup;
-	if(!historyWith || ) return false;
+	if(!historyWith) return false;
 
+  try{
     let data = await ChatMessage.getChatHistory(clientConn.userID, historyWith, group);
     connection.send(JSON.stringify({
-    	type: "chat_history", data: data, history_of: recipient
+      type: "chat_history", data: data, history_of: recipient
     }));
+  } catch(err) {
+    console.error("Couldn't get Chat History", err);
+  }
+  
 }
 
 function prepareMsgResponseObject({ type, data, recipient, clientConn }){
 	return {
-          	time: 		(new Date()).getTime(),
-          	type: 		type,
-          	text: 		data,
-          	author: 	clientConn.userID,
-          	recipient: 	recipient,
-          	group:  	clientConn.group,
-          	delivered: 	0
-        };
+    	time: 		(new Date()).getTime(),
+    	type: 		type,
+    	text: 		data,
+    	author: 	clientConn.userID,
+    	recipient: 	recipient,
+    	group:  	clientConn.group,
+    	delivered: 	0
+  };
 }
 
 var messageHandler = async function (message){
@@ -120,7 +137,7 @@ var messageHandler = async function (message){
 	          return;
 	      	var obj = prepareMsgResponseObject({ 
 	        	type: 'message', 
-	        	data: htmlEntities(message.utf8Data),
+	        	data: htmlEntities(messageObj.msg),
 	        	recipient:  messageObj.recipient,
 	        	clientConn: this
 	        });
@@ -140,7 +157,7 @@ let sendMessage = (obj) => {
 	var this_author_conns = clientLists.getClientConnections({clientId: obj.author, group: obj.group});
 	if(obj.recipient){
 	    
-	    if(clientLists.getClientConnections({clientId: obj.recipient, obj.group})) {
+	    if(clientLists.getClientConnections({clientId: obj.recipient, group: obj.group})) {
 	      	obj.delivered = 1;
 	      	sendToClient({ group: obj.group, client: obj.recipient, msg: json });
 	    }
@@ -148,6 +165,7 @@ let sendMessage = (obj) => {
 	    sendToClient({ group: obj.group, client: obj.author, msg: json });
 	}
 	else {
+      obj.delivered = 1;
 	  	broadcastInGroup({ group: obj.group, msg: json });
 	}
 	    
@@ -160,8 +178,10 @@ let sendMessage = (obj) => {
 function sendToClient({group, client, msg}){
   var client_conns = clientLists.getClientConnections({ group, clientId: client });
   // console.log(client_conns)
+  if(typeof msg !== 'string')
+    msg = JSON.stringify(msg);
   for(let i = 0; i < client_conns.length; i++) {
-    console.log(i)
+    // console.log(i)
     client_conns[i].sendUTF(msg);
   }
 }
@@ -177,25 +197,19 @@ function htmlEntities(str) {
 
 var connectionCloseHandler = function (clientConn) {
 	if (clientConn.userID !== false) {
-      // console.log((new Date()) + " Peer " + userID + " disconnected.");
-      // remove user from the list of connected clients
-      // console.log(clientLists.get(queryParams.group).values());
-      var arr = clientLists.get(clientConn.group).get(userID);
-      if(arr.length == 1){
-        clientLists.get(clientConn.group).delete(userID);
-        // console.log("Users", clientLists.get(queryParams.group).keys());
-        let msg = JSON.stringify({type: 'disconnected_peer', data: clientConn.userID}),
-            group = clientConn.group;
-        for (var client of clientLists.get(clientConn.group).keys()) {
-          sendToClient({group, client, msg});
-        }
-      } else {
-        var new_arr = arr.splice(arr_index, 1);
-        // console.log("UserLength", new_arr.length);
-        // console.log("TPYE", new_arr);
-        clientLists.get(clientConn.group).set(clientConn.userID, new_arr);
-      }
+    // console.log((new Date()) + " Peer " + userID + " disconnected.");
+    // remove user from the list of connected clients
+    // console.log(clientLists.get(queryParams.group).values());
+    // console.log("CONN", clientConn, this)
+    let remainingConns = clientLists.removeClientConnection(this);
+
+    if(remainingConns == 0) {
+      // If the client has no remaining connections, broadcast the notification to the group
+      let msg = { type: 'disconnected_peer', data: clientConn.userID },
+          group = clientConn.group;
+      broadcastInGroup({group, msg});
     }
+  }
 }
 
 module.exports = { handleClientRequest };

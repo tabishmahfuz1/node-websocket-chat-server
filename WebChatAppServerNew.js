@@ -84,7 +84,7 @@ WSServer.on('request', function(request) {
 
   var queryParams = request.resourceURL.query;
   
-  connection.userID     = request.resourceURL.query;
+  connection.userID     = request.resourceURL.query.user_id;
   connection.group      = request.resourceURL.query.group;
   
   if(!clientLists.has(connection.group)) {
